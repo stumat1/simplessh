@@ -1,4 +1,4 @@
-# simplerssh
+# simplessh
 
 A minimal, secure SSH client for Windows — built with [Tauri](https://tauri.app/),
 [russh](https://github.com/warp-tech/russh), and [xterm.js](https://xtermjs.org/).
