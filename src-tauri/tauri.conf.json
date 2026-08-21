@@ -1,0 +1,41 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "simplerssh",
+  "version": "../package.json",
+  "identifier": "com.simplerssh.app",
+  "build": {
+    "frontendDist": "../dist-web",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run vite:dev",
+    "beforeBuildCommand": "npm run vite:build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "simplerssh",
+        "width": 1000,
+        "height": 680,
+        "minWidth": 560,
+        "minHeight": 360,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#1e1e1e"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

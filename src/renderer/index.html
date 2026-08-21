@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- App loads only local content. Tight CSP; 'unsafe-inline' style is needed
+         by xterm.js (inline style attributes) and Vite; 'ws:' allows dev HMR. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws:"
+    />
+    <title>simplerssh</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Tab bar: tab buttons are inserted before the "+" button. -->
+      <div id="tabbar">
+        <button id="new-tab" class="new-tab" title="New tab (Ctrl+T)">+</button>
+      </div>
+      <!-- Tab panes are created dynamically by the renderer. -->
+      <div id="content"></div>
+      <footer class="statusbar">
+        <span id="status">No tabs</span>
+        <span id="version"></span>
+      </footer>
+
+      <!-- Host-key trust prompt: app-level singleton modal, shown during a handshake. -->
+      <div id="hostkey-view" class="overlay hidden">
+        <div class="card">
+          <h2 id="hostkey-title">Unknown host key</h2>
+          <p class="hk-line">Server: <span id="hostkey-host"></span></p>
+          <p class="hk-line">Fingerprint: <code id="hostkey-fp"></code></p>
+          <p class="hk-line hidden" id="hostkey-known-line">
+            Previously trusted: <code id="hostkey-known"></code>
+          </p>
+          <p class="error" id="hostkey-warning"></p>
+          <div class="card-actions">
+            <button type="button" id="hostkey-cancel" class="btn-secondary">Cancel</button>
+            <button type="button" id="hostkey-accept">Trust &amp; Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

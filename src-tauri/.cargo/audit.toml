@@ -1,0 +1,9 @@
+# RUSTSEC-2023-0071 (`rsa` crate "Marvin Attack" timing side-channel, pulled
+# in via russh's rsa key support): no fixed release exists upstream yet
+# (tracked at https://github.com/RustCrypto/RSA/issues/390). Exploiting it
+# requires an attacker able to repeatedly time this *client's* RSA
+# decrypt/sign operations — not realistic for an interactive outbound SSH
+# client. Prefer Ed25519 keys where possible. Re-evaluate once RustCrypto/RSA
+# ships a constant-time implementation.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]
