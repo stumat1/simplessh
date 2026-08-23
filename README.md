@@ -1,26 +1,26 @@
 # simplessh
 
-A minimal, secure SSH client for Windows — built with [Tauri](https://tauri.app/),
+A minimal, secure SSH client for Windows - built with [Tauri](https://tauri.app/),
 [russh](https://github.com/warp-tech/russh), and [xterm.js](https://xtermjs.org/).
 
 Just enough to SSH into home-lab boxes: tabbed sessions, a small saved-host list,
 password auth, host-key verification, and encrypted saved passwords. No port
-forwarding, no key/agent/MFA auth, no themes or settings dialog — pared down on
+forwarding, no key/agent/MFA auth, no themes or settings dialog - pared down on
 purpose.
 
 ## Features
 
-- **Tabbed sessions** — open and switch between a few SSH connections at once.
-- **Saved hosts** — save name/host/port/username for one-click reconnect.
-- **Password auth** — including servers that route it through PAM/keyboard-
+- **Tabbed sessions** - open and switch between a few SSH connections at once.
+- **Saved hosts** - save name/host/port/username for one-click reconnect.
+- **Password auth** - including servers that route it through PAM/keyboard-
   interactive (auto-answered transparently). Multi-factor/OTP auth isn't
   supported.
-- **Encrypted secret storage** — saved passwords live in the Windows Credential
+- **Encrypted secret storage** - saved passwords live in the Windows Credential
   Manager; plaintext is never written to disk.
-- **Host-key verification** — unknown and changed host keys prompt for an
+- **Host-key verification** - unknown and changed host keys prompt for an
   explicit trust decision (TOFU), with SHA-256 fingerprints.
-- **Auto-reconnect** — a dropped session shows a one-click reconnect overlay.
-- **Terminal niceties** — right-click copy/paste menu, clickable links.
+- **Auto-reconnect** - a dropped session shows a one-click reconnect overlay.
+- **Terminal niceties** - right-click copy/paste menu, clickable links.
 
 ## Requirements
 
@@ -70,10 +70,10 @@ NSIS installer removes both.
 
 ```
 src/
-├── renderer/    UI — tabs, terminal, connect form, host-key dialog (vanilla TS)
+├── renderer/    UI - tabs, terminal, connect form, host-key dialog (vanilla TS)
 └── shared/      Types shared between the renderer and the API bridge
 src-tauri/
-└── src/         Rust backend — SSH sessions (russh), saved hosts, secrets, known-hosts
+└── src/         Rust backend - SSH sessions (russh), saved hosts, secrets, known-hosts
 ```
 
 The renderer talks to the backend through a single typed surface (`window.ssh`,
