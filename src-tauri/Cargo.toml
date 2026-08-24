@@ -1,5 +1,5 @@
 [package]
-name = "simplerssh"
+name = "simplessh"
 version = "0.1.0"
 description = "A minimal SSH client for connecting to home-lab hosts"
 authors = ["stumat1 <stumat1@mailbox.org>"]
@@ -7,7 +7,7 @@ license = "MIT"
 edition = "2021"
 
 [lib]
-name = "simplerssh_lib"
+name = "simplessh_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

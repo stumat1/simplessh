@@ -3,7 +3,7 @@
 //! only presence checks and forget; the decrypted value is injected into
 //! connect requests backend-side.
 
-const SERVICE: &str = "simplerssh";
+const SERVICE: &str = "simplessh";
 
 /// Stable id for a stored password: pw:user@host:port.
 pub fn password_id(host: &str, port: u16, username: &str) -> String {

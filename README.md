@@ -48,10 +48,10 @@ npm run build
 ```
 
 This typechecks, bundles the UI, compiles the Rust backend in release mode, and
-produces `src-tauri/target/release/simplerssh.exe` (standalone) plus an NSIS
+produces `src-tauri/target/release/simplessh.exe` (standalone) plus an NSIS
 installer under `src-tauri/target/release/bundle/nsis/`.
 
-App data (saved hosts, known hosts) lives in `%APPDATA%\com.simplerssh.app`;
+App data (saved hosts, known hosts) lives in `%APPDATA%\com.simplessh.app`;
 saved passwords live in the Windows Credential Manager. Uninstalling via the
 NSIS installer removes both.
 

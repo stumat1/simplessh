@@ -1,5 +1,5 @@
 {
-  "name": "simplerssh",
+  "name": "simplessh",
   "version": "0.1.0",
   "description": "A minimal Windows SSH client for connecting to home-lab hosts (Tauri + russh + xterm.js)",
   "author": "stumat1 <stumat1@mailbox.org>",

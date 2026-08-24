@@ -193,7 +193,7 @@ class Tab {
   private async quitApp(): Promise<void> {
     if (this.mgr.hasLiveSessionsExcept(this)) {
       const ok = await ask('Other tabs still have open connections. Quit anyway?', {
-        title: 'simplerssh',
+        title: 'simplessh',
         kind: 'warning'
       })
       if (!ok) return

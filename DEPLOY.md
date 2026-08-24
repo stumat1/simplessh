@@ -1,4 +1,4 @@
-# Deploying simplerssh
+# Deploying simplessh
 
 ## Requirements
 
@@ -32,8 +32,8 @@ and produces:
 
 ```
 src-tauri/target/release/
-├── simplerssh.exe                                # standalone, self-contained app
-└── bundle/nsis/simplerssh_<version>_x64-setup.exe # per-user NSIS installer
+├── simplessh.exe                                # standalone, self-contained app
+└── bundle/nsis/simplessh_<version>_x64-setup.exe # per-user NSIS installer
 ```
 
 Both are unsigned unless you've set up code signing yourself — Windows Smart
@@ -43,18 +43,18 @@ App Control (or SmartScreen) may flag an unsigned installer on first run.
 
 Two options, both from the `src-tauri/target/release/` output above:
 
-- **Installer** — run `simplerssh_<version>_x64-setup.exe`. Installs
+- **Installer** — run `simplessh_<version>_x64-setup.exe`. Installs
   per-user (no admin required), adds a Start-menu shortcut, and registers an
   uninstaller.
-- **Portable** — copy `simplerssh.exe` anywhere and run it directly. UI
+- **Portable** — copy `simplessh.exe` anywhere and run it directly. UI
   assets are embedded in the binary and WebView2 ships with Windows, so no
   installation step is needed.
 
 ### Data locations
 
-- App data (saved hosts, known hosts): `%APPDATA%\com.simplerssh.app`
+- App data (saved hosts, known hosts): `%APPDATA%\com.simplessh.app`
 - Saved passwords: Windows Credential Manager, under targets ending in
-  `.simplerssh`
+  `.simplessh`
 
 ### Uninstalling
 
@@ -62,6 +62,6 @@ Two options, both from the `src-tauri/target/release/` output above:
   shortcut). This removes the app files, the app-data folder, and every saved
   password. Upgrading in place (installing a newer version over an older one)
   does **not** trigger this cleanup — only a real uninstall does.
-- **Portable**: delete `simplerssh.exe`, then manually remove
-  `%APPDATA%\com.simplerssh.app` and any `*.simplerssh` entries in Credential
+- **Portable**: delete `simplessh.exe`, then manually remove
+  `%APPDATA%\com.simplessh.app` and any `*.simplessh` entries in Credential
   Manager if you want the saved hosts/passwords gone too.

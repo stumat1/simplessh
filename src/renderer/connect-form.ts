@@ -14,7 +14,7 @@ export interface ConnectFormHandle {
 }
 
 /** Broadcast so every open connect form refreshes its saved-hosts list. */
-const HOSTS_CHANGED = 'simplerssh:hosts-changed'
+const HOSTS_CHANGED = 'simplessh:hosts-changed'
 function announceHostsChanged(): void {
   window.dispatchEvent(new CustomEvent(HOSTS_CHANGED))
 }

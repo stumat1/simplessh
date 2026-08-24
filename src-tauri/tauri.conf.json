@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "simplerssh",
+  "productName": "simplessh",
   "version": "../package.json",
-  "identifier": "com.simplerssh.app",
+  "identifier": "com.simplessh.app",
   "build": {
     "frontendDist": "../dist-web",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "simplerssh",
+        "title": "simplessh",
         "width": 1000,
         "height": 680,
         "minWidth": 560,
