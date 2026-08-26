@@ -1,3 +1,4 @@
+<img width="745" height="532" alt="simplesshscreenshot" src="https://github.com/user-attachments/assets/7ba96dfd-4456-4e24-a2cf-bee8c5190885" />
 # simplessh
 
 A minimal, secure SSH client for Windows - built with [Tauri](https://tauri.app/),
@@ -7,6 +8,9 @@ Just enough to SSH into home-lab boxes: tabbed sessions, a small saved-host list
 password auth, host-key verification, and encrypted saved passwords. No port
 forwarding, no key/agent/MFA auth, no themes or settings dialog - pared down on
 purpose.
+
+<img width="745" height="532" alt="simplesshscreenshot" src="https://github.com/user-attachments/assets/b02fb50c-4058-4fa7-aa6b-73f1edd8608a" />
+
 
 ## Features
 
