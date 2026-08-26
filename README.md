@@ -1,4 +1,4 @@
-<img width="745" height="532" alt="simplesshscreenshot" src="https://github.com/user-attachments/assets/7ba96dfd-4456-4e24-a2cf-bee8c5190885" />
+
 # simplessh
 
 A minimal, secure SSH client for Windows - built with [Tauri](https://tauri.app/),
