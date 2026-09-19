@@ -1,6 +1,6 @@
 {
   "name": "simplessh",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A minimal Windows SSH client for connecting to home-lab hosts (Tauri + russh + xterm.js)",
   "author": "stumat1 <stumat1@mailbox.org>",
   "license": "MIT",
