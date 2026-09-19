@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use russh::client;
-use russh::keys::PublicKey;
+use russh::keys::PublicKeyOrCertificate;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
@@ -30,11 +30,13 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         // Compare the raw wire-format key blob — the same bytes ssh2 handed to
         // hostVerifier, so entries migrated from the Electron build still match.
-        let Ok(key_bytes) = server_public_key.to_bytes() else {
+        // A host certificate is fingerprinted by its underlying public key,
+        // since this app has no certificate-specific trust UI.
+        let Ok(key_bytes) = server_public_key.public_key().to_bytes() else {
             return Ok(false); // un-encodable key — fail closed
         };
 
