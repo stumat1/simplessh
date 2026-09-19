@@ -9,7 +9,8 @@ password auth, host-key verification, and encrypted saved passwords. No port
 forwarding, no key/agent/MFA auth, no themes or settings dialog - pared down on
 purpose.
 
-<img width="745" height="532" alt="simplesshscreenshot" src="https://github.com/user-attachments/assets/b02fb50c-4058-4fa7-aa6b-73f1edd8608a" />
+<img width="750" height="531" alt="simplesshscreenshot" src="https://github.com/user-attachments/assets/9821656c-b690-433a-b6df-173c1fd0a198" />
+
 
 
 ## Features
