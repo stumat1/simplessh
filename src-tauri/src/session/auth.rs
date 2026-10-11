@@ -18,6 +18,8 @@ use crate::types::ConnectRequest;
 /// server that accepted TCP but stalled. The host-key prompt (which pauses
 /// the handshake on the user) extends the deadline — see connect_and_auth.
 const HANDSHAKE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Bound password and keyboard-interactive exchanges after host-key approval.
+const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 pub async fn connect_and_auth(
     app: &AppHandle,
@@ -69,11 +71,17 @@ pub async fn connect_and_auth(
         }
     };
 
-    let password = req.password.as_deref().unwrap_or("");
-    if auth_password(&mut handle, &req.username, password).await? {
-        return Ok(handle);
-    }
-    if keyboard_interactive_password(&mut handle, &req.username, password).await? {
+    let auth = async {
+        let password = req.password.as_deref().unwrap_or("");
+        if auth_password(&mut handle, &req.username, password).await? {
+            return Ok::<bool, Error>(true);
+        }
+        keyboard_interactive_password(&mut handle, &req.username, password).await
+    };
+    let authenticated = tokio::time::timeout(AUTH_TIMEOUT, auth)
+        .await
+        .map_err(|_| Error::msg("Timed out while authenticating"))??;
+    if authenticated {
         return Ok(handle);
     }
 

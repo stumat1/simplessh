@@ -20,11 +20,21 @@ use crate::types::{ConnectRequest, SessionStatus, TerminalSize};
 enum SessionCmd {
     Write(Vec<u8>),
     Resize { cols: u32, rows: u32 },
-    Disconnect,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SessionSignal {
+    None,
+    Disconnect,
+    InputOverflow,
+}
+
+const COMMAND_QUEUE_CAPACITY: usize = 64;
+const MAX_INPUT_MESSAGE_BYTES: usize = 256 * 1024;
+
 struct SessionHandle {
-    cmd_tx: mpsc::UnboundedSender<SessionCmd>,
+    cmd_tx: mpsc::Sender<SessionCmd>,
+    signal_tx: tokio::sync::watch::Sender<SessionSignal>,
 }
 
 #[derive(Default)]
@@ -89,46 +99,57 @@ impl SessionManager {
         on_data: Channel<InvokeResponseBody>,
     ) -> String {
         let session_id = Uuid::new_v4().to_string();
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
+        let (signal_tx, signal_rx) = tokio::sync::watch::channel(SessionSignal::None);
         self.sessions
             .lock()
             .unwrap()
-            .insert(session_id.clone(), SessionHandle { cmd_tx });
+            .insert(session_id.clone(), SessionHandle { cmd_tx, signal_tx });
         emit_status(&app, &session_id, SessionStatus::Connecting);
 
         let id = session_id.clone();
         tauri::async_runtime::spawn(async move {
-            run_session(app, id, req, size, on_data, cmd_rx).await;
+            run_session(app, id, req, size, on_data, cmd_rx, signal_rx).await;
         });
 
         session_id
     }
 
-    /// Writes user keystrokes to the shell stream.
+    /// Queues user input with a strict memory bound. Overload terminates the
+    /// session so input is never silently lost.
     pub fn write(&self, session_id: &str, data: &str) {
         if let Some(s) = self.sessions.lock().unwrap().get(session_id) {
-            let _ = s.cmd_tx.send(SessionCmd::Write(data.as_bytes().to_vec()));
+            if data.len() > MAX_INPUT_MESSAGE_BYTES
+                || s.cmd_tx
+                    .try_send(SessionCmd::Write(data.as_bytes().to_vec()))
+                    .is_err()
+            {
+                // Close explicitly on overload rather than silently dropping
+                // terminal input. This signal has its own channel so a full
+                // command queue cannot prevent teardown.
+                let _ = s.signal_tx.send(SessionSignal::InputOverflow);
+            }
         }
     }
 
     /// Resizes the remote PTY to match the terminal grid.
     pub fn resize(&self, session_id: &str, cols: u32, rows: u32) {
         if let Some(s) = self.sessions.lock().unwrap().get(session_id) {
-            let _ = s.cmd_tx.send(SessionCmd::Resize { cols, rows });
+            let _ = s.cmd_tx.try_send(SessionCmd::Resize { cols, rows });
         }
     }
 
     /// Requests a graceful disconnect; final cleanup happens in the session task.
     pub fn disconnect(&self, session_id: &str) {
         if let Some(s) = self.sessions.lock().unwrap().get(session_id) {
-            let _ = s.cmd_tx.send(SessionCmd::Disconnect);
+            let _ = s.signal_tx.send(SessionSignal::Disconnect);
         }
     }
 
     /// Disconnects every live session (e.g. on app exit).
     pub fn disconnect_all(&self) {
         for s in self.sessions.lock().unwrap().values() {
-            let _ = s.cmd_tx.send(SessionCmd::Disconnect);
+            let _ = s.signal_tx.send(SessionSignal::Disconnect);
         }
     }
 
@@ -146,7 +167,11 @@ fn cleanup(app: &AppHandle, session_id: &str, status: SessionStatus) {
     if !state.sessions.take(session_id) {
         return; // already cleaned up — avoids duplicate status events
     }
-    state.pending_secret_saves.lock().unwrap().remove(session_id);
+    state
+        .pending_secret_saves
+        .lock()
+        .unwrap()
+        .remove(session_id);
     state.pending.drain_session(session_id);
     emit_status(app, session_id, status);
     log::debug!("live sessions: {} ({:?})", state.sessions.size(), status);
@@ -169,7 +194,12 @@ fn fail(app: &AppHandle, session_id: &str, message: String) {
 /// Auth succeeded — persist the password (if requested).
 fn on_ready(app: &AppHandle, session_id: &str) {
     let state = app.state::<AppState>();
-    if let Some(pending) = state.pending_secret_saves.lock().unwrap().remove(session_id) {
+    if let Some(pending) = state
+        .pending_secret_saves
+        .lock()
+        .unwrap()
+        .remove(session_id)
+    {
         state.secrets.set(&pending.id, &pending.value);
     }
     emit_status(app, session_id, SessionStatus::Ready);
@@ -183,7 +213,8 @@ async fn run_session(
     req: ConnectRequest,
     size: Option<TerminalSize>,
     on_data: Channel<InvokeResponseBody>,
-    mut cmd_rx: mpsc::UnboundedReceiver<SessionCmd>,
+    mut cmd_rx: mpsc::Receiver<SessionCmd>,
+    mut signal_rx: tokio::sync::watch::Receiver<SessionSignal>,
 ) {
     // Dead-peer detection: send a keepalive every 15s; after keepalive_max
     // (default 3) go unanswered, russh returns KeepaliveTimeout and the
@@ -194,19 +225,19 @@ async fn run_session(
         ..Default::default()
     });
 
-    // No blanket timeout here: connect_and_auth may legitimately sit for
-    // minutes inside a host-key prompt waiting on the user (each prompt and
-    // the network phases carry their own timeouts inside). The command queue
-    // is drained concurrently so a Disconnect (tab closed, Cancel pressed)
-    // aborts the attempt instead of sitting unread until auth resolves.
+    // Host-key approval may wait on the user; the other network phases have
+    // explicit deadlines. Keep processing resize and cancellation while the
+    // connection future is pending.
     let (cols, rows) = size.map(|s| (s.cols, s.rows)).unwrap_or((80, 24));
     let connect = async {
         let handle = auth::connect_and_auth(&app, &session_id, &req, config)
             .await
             .map_err(|e| e.to_string())?;
-        let channel = open_shell(&handle, cols, rows)
-            .await
-            .map_err(|e| e.to_string())?;
+        let channel =
+            tokio::time::timeout(Duration::from_secs(30), open_shell(&handle, cols, rows))
+                .await
+                .map_err(|_| "Timed out while opening the SSH shell".to_string())?
+                .map_err(|e| e.to_string())?;
         Ok::<_, String>((handle, channel))
     };
     tokio::pin!(connect);
@@ -223,7 +254,7 @@ async fn run_session(
                 }
             },
             cmd = cmd_rx.recv() => match cmd {
-                Some(SessionCmd::Disconnect) | None => {
+                None => {
                     // Dropping the connect future tears down the socket;
                     // cleanup drains any prompt still waiting on the renderer.
                     cleanup(&app, &session_id, SessionStatus::Closed);
@@ -232,7 +263,21 @@ async fn run_session(
                 Some(SessionCmd::Resize { cols, rows }) => {
                     queued_resize = Some((cols, rows));
                 }
-                Some(_) => {} // writes can't apply before ready — drop
+                Some(SessionCmd::Write(_)) => {} // writes can't apply before ready
+            },
+            changed = signal_rx.changed() => {
+                let signal = *signal_rx.borrow_and_update();
+                match (changed, signal) {
+                    (_, SessionSignal::InputOverflow) => {
+                        fail(&app, &session_id, "Too much terminal input queued; session closed".into());
+                        return;
+                    }
+                    (Err(_), _) | (_, SessionSignal::Disconnect) => {
+                        cleanup(&app, &session_id, SessionStatus::Closed);
+                        return;
+                    }
+                    (Ok(()), SessionSignal::None) => {}
+                }
             },
         }
     };
@@ -264,17 +309,26 @@ async fn run_session(
             cmd = cmd_rx.recv() => {
                 match cmd {
                     Some(SessionCmd::Write(bytes)) => {
-                        if channel.data(&bytes[..]).await.is_err() {
-                            break;
-                        }
+                        if channel.data(&bytes[..]).await.is_err() { break; }
                     }
                     Some(SessionCmd::Resize { cols, rows }) => {
                         let _ = channel.window_change(cols, rows, 0, 0).await;
                     }
-                    Some(SessionCmd::Disconnect) | None => {
+                    None => break,
+                }
+            },
+            changed = signal_rx.changed() => {
+                let signal = *signal_rx.borrow_and_update();
+                match (changed, signal) {
+                    (_, SessionSignal::InputOverflow) => {
+                        fail(&app, &session_id, "Too much terminal input queued; session closed".into());
+                        return;
+                    }
+                    (Err(_), _) | (_, SessionSignal::Disconnect) => {
                         let _ = channel.eof().await;
                         break;
                     }
+                    (Ok(()), SessionSignal::None) => {}
                 }
             }
         }

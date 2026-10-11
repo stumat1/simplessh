@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::types::HostEntry;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct PersistShape {
     #[serde(default)]
     hosts: Vec<HostEntry>,
@@ -32,11 +32,11 @@ impl HostStore {
 
     /// Write the store to disk. Errors are returned (not swallowed) so
     /// explicit user actions (save/delete) can report them.
-    fn persist(&self) -> Result<(), String> {
+    fn persist(&self, data: &PersistShape) -> Result<(), String> {
         if let Some(dir) = self.file_path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let json = serde_json::to_string_pretty(&self.data).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
         std::fs::write(&self.file_path, json).map_err(|e| e.to_string())
     }
 
@@ -54,19 +54,23 @@ impl HostStore {
             },
             ..input
         };
-        match self.data.hosts.iter_mut().find(|h| h.id == entry.id) {
+        let mut candidate = self.data.clone();
+        match candidate.hosts.iter_mut().find(|h| h.id == entry.id) {
             Some(existing) => *existing = entry.clone(),
-            None => self.data.hosts.push(entry.clone()),
+            None => candidate.hosts.push(entry.clone()),
         }
-        self.persist()?;
+        self.persist(&candidate)?;
+        self.data = candidate;
         Ok(entry)
     }
 
     pub fn delete(&mut self, id: &str) -> Result<(), String> {
-        let before = self.data.hosts.len();
-        self.data.hosts.retain(|h| h.id != id);
-        if self.data.hosts.len() != before {
-            self.persist()?;
+        let mut candidate = self.data.clone();
+        let before = candidate.hosts.len();
+        candidate.hosts.retain(|h| h.id != id);
+        if before != self.data.hosts.len() {
+            self.persist(&candidate)?;
+            self.data = candidate;
         }
         Ok(())
     }
