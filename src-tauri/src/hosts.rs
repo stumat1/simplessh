@@ -68,7 +68,7 @@ impl HostStore {
         let mut candidate = self.data.clone();
         let before = candidate.hosts.len();
         candidate.hosts.retain(|h| h.id != id);
-        if before != self.data.hosts.len() {
+        if candidate.hosts.len() != before {
             self.persist(&candidate)?;
             self.data = candidate;
         }

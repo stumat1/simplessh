@@ -34,8 +34,8 @@ pub async fn connect_and_auth(
         port: req.port,
     };
 
-    // Bound only the TCP connect: everything after it can block on user
-    // prompts (host-key trust) with their own timeouts.
+    // Bound the TCP connect. The handshake and auth phases below carry their
+    // own deadlines (the host-key prompt extends the handshake's).
     let stream = tokio::time::timeout(
         std::time::Duration::from_secs(20),
         tokio::net::TcpStream::connect((req.host.as_str(), req.port)),
