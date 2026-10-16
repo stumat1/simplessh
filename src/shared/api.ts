@@ -10,8 +10,11 @@ export type HostKeyListener = (prompt: HostKeyPrompt) => void
 export interface SshApi {
   getVersion(): Promise<string>
 
-  /** Open an SSH session + PTY shell. Resolves with the new sessionId. */
-  connect(req: ConnectRequest, size?: TerminalSize): Promise<string>
+  /**
+   * Open an SSH session + PTY shell under a caller-chosen sessionId (a fresh
+   * UUID), so the caller can route its events before the call resolves.
+   */
+  connect(sessionId: string, req: ConnectRequest, size?: TerminalSize): Promise<void>
 
   /** Request a graceful disconnect of a session. */
   disconnect(sessionId: string): Promise<void>

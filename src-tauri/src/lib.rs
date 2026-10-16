@@ -5,6 +5,7 @@ mod known_hosts;
 mod secrets;
 mod session;
 mod state;
+mod store;
 mod types;
 
 use tauri::Manager;

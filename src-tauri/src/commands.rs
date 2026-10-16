@@ -3,46 +3,40 @@
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Manager, State};
 
+use crate::error::Error;
 use crate::secrets::password_id;
-use crate::state::{AppState, PendingSecretSave};
+use crate::state::AppState;
 use crate::types::{ConnectRequest, HostEntry, TerminalSize};
 
+/// The renderer picks the sessionId so it can route this session's status
+/// and error events before the connection has even started.
 #[tauri::command]
 pub fn ssh_connect(
     app: AppHandle,
     state: State<'_, AppState>,
+    session_id: String,
     mut req: ConnectRequest,
     size: Option<TerminalSize>,
     on_data: Channel<InvokeResponseBody>,
-) -> String {
+) -> Result<(), Error> {
     // If a password wasn't supplied but one is saved, inject it (the
-    // decrypted value never leaves the backend).
+    // decrypted value never leaves the backend). It is already saved, so
+    // there is nothing to persist on success.
     if req.password.is_none() {
         if let Some(saved) = state
             .secrets
             .get(&password_id(&req.host, req.port, &req.username))
         {
             req.password = Some(saved);
+            req.save_password = None;
         }
     }
 
-    let session_id = state
+    state
         .sessions
-        .connect(app.clone(), req.clone(), size, on_data);
-
-    if req.save_password == Some(true) {
-        if let Some(password) = &req.password {
-            state.pending_secret_saves.lock().unwrap().insert(
-                session_id.clone(),
-                PendingSecretSave {
-                    id: password_id(&req.host, req.port, &req.username),
-                    value: password.clone(),
-                },
-            );
-        }
-    }
+        .connect(app.clone(), session_id, req, size, on_data)?;
     log::debug!("live sessions: {} (connect)", state.sessions.size());
-    session_id
+    Ok(())
 }
 
 #[tauri::command]
@@ -101,9 +95,20 @@ pub fn hosts_save(state: State<'_, AppState>, entry: HostEntry) -> Result<HostEn
     state.hosts.lock().unwrap().save(entry)
 }
 
+/// Delete a saved host, and its saved password unless another saved host
+/// still uses the same user@host:port (the password is keyed by those).
 #[tauri::command]
 pub fn hosts_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.hosts.lock().unwrap().delete(&id)
+    let mut hosts = state.hosts.lock().unwrap();
+    let Some(removed) = hosts.delete(&id)? else {
+        return Ok(());
+    };
+    if !hosts.list().iter().any(|h| h.same_target(&removed)) {
+        state
+            .secrets
+            .delete(&password_id(&removed.host, removed.port, &removed.username));
+    }
+    Ok(())
 }
 
 /// Everything `run()` registers, in one place.

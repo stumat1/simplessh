@@ -22,38 +22,34 @@ pub struct HostStore {
 
 impl HostStore {
     pub fn new(file_path: PathBuf) -> Self {
-        // Corrupt/unreadable store — start empty rather than crash.
-        let data = std::fs::read_to_string(&file_path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
+        // Unreadable store — start empty rather than crash (a corrupt file
+        // is kept aside; the warning is logged by store::load).
+        let (data, _warning) = crate::store::load(&file_path);
         Self { file_path, data }
     }
 
     /// Write the store to disk. Errors are returned (not swallowed) so
     /// explicit user actions (save/delete) can report them.
     fn persist(&self, data: &PersistShape) -> Result<(), String> {
-        if let Some(dir) = self.file_path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-        std::fs::write(&self.file_path, json).map_err(|e| e.to_string())
+        crate::store::save(&self.file_path, data)
     }
 
     pub fn list(&self) -> Vec<HostEntry> {
         self.data.hosts.clone()
     }
 
-    /// Create or update a host entry (upsert by id). Returns the stored entry.
+    /// Create or update a host entry (upsert by id). A new entry (empty id)
+    /// for a user@host:port that is already saved updates that entry instead
+    /// of adding a duplicate. Returns the stored entry.
     pub fn save(&mut self, input: HostEntry) -> Result<HostEntry, String> {
-        let entry = HostEntry {
-            id: if input.id.is_empty() {
-                Uuid::new_v4().to_string()
-            } else {
-                input.id.clone()
-            },
-            ..input
+        let id = if !input.id.is_empty() {
+            input.id.clone()
+        } else if let Some(existing) = self.data.hosts.iter().find(|h| h.same_target(&input)) {
+            existing.id.clone()
+        } else {
+            Uuid::new_v4().to_string()
         };
+        let entry = HostEntry { id, ..input };
         let mut candidate = self.data.clone();
         match candidate.hosts.iter_mut().find(|h| h.id == entry.id) {
             Some(existing) => *existing = entry.clone(),
@@ -64,15 +60,17 @@ impl HostStore {
         Ok(entry)
     }
 
-    pub fn delete(&mut self, id: &str) -> Result<(), String> {
+    /// Remove a host entry; returns the removed entry, or None if no entry
+    /// had that id.
+    pub fn delete(&mut self, id: &str) -> Result<Option<HostEntry>, String> {
         let mut candidate = self.data.clone();
-        let before = candidate.hosts.len();
-        candidate.hosts.retain(|h| h.id != id);
-        if candidate.hosts.len() != before {
-            self.persist(&candidate)?;
-            self.data = candidate;
-        }
-        Ok(())
+        let Some(index) = candidate.hosts.iter().position(|h| h.id == id) else {
+            return Ok(None);
+        };
+        let removed = candidate.hosts.remove(index);
+        self.persist(&candidate)?;
+        self.data = candidate;
+        Ok(Some(removed))
     }
 }
 
@@ -140,8 +138,40 @@ mod tests {
                 save_password: false,
             })
             .unwrap();
-        store.delete(&saved.id).unwrap();
+        let removed = store.delete(&saved.id).unwrap();
+        assert_eq!(removed.map(|h| h.id), Some(saved.id.clone()));
         assert!(store.list().is_empty());
+        assert!(store.delete(&saved.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn saving_same_target_again_updates_instead_of_duplicating() {
+        let (_dir, mut store) = store();
+        let first = store
+            .save(HostEntry {
+                id: String::new(),
+                name: "NAS".into(),
+                host: "h".into(),
+                port: 22,
+                username: "u".into(),
+                save_password: false,
+            })
+            .unwrap();
+        let second = store
+            .save(HostEntry {
+                id: String::new(),
+                name: "NAS (renamed)".into(),
+                host: "h".into(),
+                port: 22,
+                username: "u".into(),
+                save_password: true,
+            })
+            .unwrap();
+        assert_eq!(first.id, second.id);
+        let list = store.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "NAS (renamed)");
+        assert!(list[0].save_password);
     }
 
     #[test]

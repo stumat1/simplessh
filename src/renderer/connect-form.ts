@@ -1,3 +1,4 @@
+import { ask } from '@tauri-apps/plugin-dialog'
 import type { ConnectRequest, HostEntry } from '@shared/types'
 
 export interface ConnectFormHandle {
@@ -37,7 +38,7 @@ const TEMPLATE = `
     <label class="checkbox"><input class="f-save-pass" type="checkbox" /> Save password</label>
     <label class="checkbox"><input class="f-save-host" type="checkbox" /> Save this host</label>
 
-    <p class="hint f-hint"></p>
+    <p class="hint"><span class="f-hint"></span> <button type="button" class="link-btn f-forget hidden">Forget it</button></p>
     <p class="error" role="alert"></p>
     <button type="submit">Connect</button>
   </form>
@@ -68,6 +69,7 @@ export function createConnectForm(onConnect: (req: ConnectRequest) => void): Con
   const savePass = q<HTMLInputElement>('.f-save-pass')
   const saveHost = q<HTMLInputElement>('.f-save-host')
   const hintEl = q<HTMLElement>('.f-hint')
+  const forgetBtn = q<HTMLButtonElement>('.f-forget')
   const errorEl = q<HTMLElement>('.error')
   const submit = q<HTMLButtonElement>('button[type="submit"]')
 
@@ -82,15 +84,32 @@ export function createConnectForm(onConnect: (req: ConnectRequest) => void): Con
     if (h && u && (await window.ssh.hasPassword(h, p, u))) {
       hintEl.textContent = 'A saved password will be used. Type a new one to replace it.'
       pass.placeholder = '•••••••• (saved)'
+      forgetBtn.classList.remove('hidden')
       return
     }
     pass.placeholder = ''
     hintEl.textContent = ''
+    forgetBtn.classList.add('hidden')
   }
 
   for (const inputEl of [host, port, user]) {
     inputEl.addEventListener('change', () => void refreshHint())
   }
+
+  async function forgetPassword(): Promise<void> {
+    const h = host.value.trim()
+    const u = user.value.trim()
+    const p = Number(port.value) || 22
+    const ok = await ask(`Forget the saved password for ${u}@${h}:${p}?`, {
+      title: 'simplessh',
+      kind: 'warning'
+    })
+    if (!ok) return
+    await window.ssh.forgetPassword(h, p, u)
+    await refreshHint()
+  }
+
+  forgetBtn.addEventListener('click', () => void forgetPassword())
 
   // --- Building requests -----------------------------------------------------
   async function handleSubmit(): Promise<void> {
@@ -149,12 +168,19 @@ export function createConnectForm(onConnect: (req: ConnectRequest) => void): Con
   // --- Saved hosts -------------------------------------------------------
 
   /** Populate fields from a saved host (secrets are not restored into inputs). */
-  function loadInto(entry: { name?: string; host: string; port: number; username: string }): void {
+  function loadInto(entry: {
+    name?: string
+    host: string
+    port: number
+    username: string
+    savePassword?: boolean
+  }): void {
     name.value = entry.name ?? ''
     host.value = entry.host
     port.value = String(entry.port)
     user.value = entry.username
     pass.value = ''
+    if (entry.savePassword !== undefined) savePass.checked = entry.savePassword
   }
 
   /**
@@ -197,17 +223,40 @@ export function createConnectForm(onConnect: (req: ConnectRequest) => void): Con
       del.textContent = '×'
       del.addEventListener('click', (e) => {
         e.stopPropagation()
-        // The in-memory entry is removed either way; only the on-disk write
-        // can fail, so log it but still refresh the (now-stale) list.
-        window.ssh
-          .deleteHost(entry.id)
-          .catch((err: unknown) => console.error('Failed to delete host:', err))
-          .then(announceHostsChanged)
+        void deleteHost(entry, entries)
       })
 
       li.append(openBtn, del)
       hostListEl.appendChild(li)
     }
+  }
+
+  /**
+   * Confirm, then delete a saved host. The backend also forgets its saved
+   * password unless another saved host uses the same user@host:port.
+   */
+  async function deleteHost(entry: HostEntry, entries: HostEntry[]): Promise<void> {
+    const sharesCredentials = entries.some(
+      (other) =>
+        other.id !== entry.id &&
+        other.host === entry.host &&
+        other.port === entry.port &&
+        other.username === entry.username
+    )
+    const forgetsPassword =
+      !sharesCredentials && (await window.ssh.hasPassword(entry.host, entry.port, entry.username))
+    const ok = await ask(
+      `Delete the saved host "${entry.name}"?${forgetsPassword ? ' Its saved password will also be removed.' : ''}`,
+      { title: 'simplessh', kind: 'warning' }
+    )
+    if (!ok) return
+    try {
+      await window.ssh.deleteHost(entry.id)
+    } catch (err) {
+      errorEl.textContent = `Host not deleted: ${err instanceof Error ? err.message : String(err)}`
+    }
+    announceHostsChanged()
+    void refreshHint()
   }
 
   async function refreshHosts(): Promise<void> {
@@ -235,7 +284,13 @@ export function createConnectForm(onConnect: (req: ConnectRequest) => void): Con
       submit.disabled = busy
       submit.textContent = busy ? 'Connecting…' : 'Connect'
     },
-    prefill: (req) => loadInto({ host: req.host, port: req.port, username: req.username }),
+    prefill: (req) =>
+      loadInto({
+        host: req.host,
+        port: req.port,
+        username: req.username,
+        savePassword: req.savePassword
+      }),
     dispose: () => {
       window.removeEventListener(HOSTS_CHANGED, onHostsChanged)
     }

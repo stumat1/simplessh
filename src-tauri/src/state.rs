@@ -12,12 +12,6 @@ use crate::hosts::HostStore;
 use crate::known_hosts::KnownHostsStore;
 use crate::secrets::SecretStore;
 
-/// Secret to persist iff the connection authenticates (reaches 'ready').
-pub struct PendingSecretSave {
-    pub id: String,
-    pub value: String,
-}
-
 #[derive(Default)]
 pub struct PendingPrompts {
     /// Host-key trust decisions awaiting a renderer response, by sessionId.
@@ -38,8 +32,6 @@ pub struct AppState {
     pub hosts: Mutex<HostStore>,
     pub secrets: SecretStore,
     pub pending: PendingPrompts,
-    /// Secrets to persist on successful auth, by sessionId.
-    pub pending_secret_saves: Mutex<HashMap<String, PendingSecretSave>>,
     pub sessions: crate::session::SessionManager,
 }
 
@@ -50,7 +42,6 @@ impl AppState {
             hosts: Mutex::new(HostStore::new(data_dir.join("hosts.json"))),
             secrets: SecretStore,
             pending: PendingPrompts::default(),
-            pending_secret_saves: Mutex::new(HashMap::new()),
             sessions: crate::session::SessionManager::new(),
         }
     }

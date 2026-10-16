@@ -4,6 +4,7 @@
 mod auth;
 mod handler;
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,8 +13,9 @@ use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
+use crate::error::Error;
+use crate::secrets::password_id;
 use crate::state::AppState;
 use crate::types::{ConnectRequest, SessionStatus, TerminalSize};
 
@@ -35,6 +37,8 @@ enum SessionSignal {
 /// limit is only reached when the remote has stopped accepting input.
 const COMMAND_QUEUE_CAPACITY: usize = 1024;
 const MAX_QUEUED_INPUT_BYTES: usize = 8 * 1024 * 1024;
+/// Renderer-chosen ids are UUIDs; anything much longer is a bug.
+const MAX_SESSION_ID_LEN: usize = 64;
 
 struct SessionHandle {
     cmd_tx: mpsc::Sender<SessionCmd>,
@@ -101,28 +105,33 @@ impl SessionManager {
         self.sessions.lock().unwrap().len()
     }
 
-    /// Opens an SSH connection and a PTY shell. Returns the new sessionId
-    /// immediately; connection progress is reported via status/error events
-    /// and the data channel.
+    /// Opens an SSH connection and a PTY shell under the caller-chosen
+    /// sessionId. Returns once the session is registered; connection progress
+    /// is reported via status/error events and the data channel.
     pub fn connect(
         &self,
         app: AppHandle,
+        session_id: String,
         req: ConnectRequest,
         size: Option<TerminalSize>,
         on_data: Channel<InvokeResponseBody>,
-    ) -> String {
-        let session_id = Uuid::new_v4().to_string();
+    ) -> Result<(), Error> {
+        if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_LEN {
+            return Err(Error::msg("Invalid session id"));
+        }
         let (cmd_tx, cmd_rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
         let (signal_tx, signal_rx) = tokio::sync::watch::channel(SessionSignal::None);
         let queued_input = Arc::new(AtomicUsize::new(0));
-        self.sessions.lock().unwrap().insert(
-            session_id.clone(),
-            SessionHandle {
-                cmd_tx,
-                signal_tx,
-                queued_input: queued_input.clone(),
-            },
-        );
+        match self.sessions.lock().unwrap().entry(session_id.clone()) {
+            Entry::Occupied(_) => return Err(Error::msg("Session id already in use")),
+            Entry::Vacant(slot) => {
+                slot.insert(SessionHandle {
+                    cmd_tx,
+                    signal_tx,
+                    queued_input: queued_input.clone(),
+                });
+            }
+        }
         let inbox = SessionInbox {
             cmd_rx,
             signal_rx,
@@ -130,12 +139,10 @@ impl SessionManager {
         };
         emit_status(&app, &session_id, SessionStatus::Connecting);
 
-        let id = session_id.clone();
         tauri::async_runtime::spawn(async move {
-            run_session(app, id, req, size, on_data, inbox).await;
+            run_session(app, session_id, req, size, on_data, inbox).await;
         });
-
-        session_id
+        Ok(())
     }
 
     /// Queues user input with a strict memory bound. Overload terminates the
@@ -202,11 +209,6 @@ fn cleanup(app: &AppHandle, session_id: &str, status: SessionStatus) {
     if !state.sessions.take(session_id) {
         return; // already cleaned up — avoids duplicate status events
     }
-    state
-        .pending_secret_saves
-        .lock()
-        .unwrap()
-        .remove(session_id);
     state.pending.drain_session(session_id);
     emit_status(app, session_id, status);
     log::debug!("live sessions: {} ({:?})", state.sessions.size(), status);
@@ -227,18 +229,28 @@ fn fail(app: &AppHandle, session_id: &str, message: String) {
 }
 
 /// Auth succeeded — persist the password (if requested).
-fn on_ready(app: &AppHandle, session_id: &str) {
-    let state = app.state::<AppState>();
-    if let Some(pending) = state
-        .pending_secret_saves
-        .lock()
-        .unwrap()
-        .remove(session_id)
-    {
-        state.secrets.set(&pending.id, &pending.value);
+fn on_ready(
+    app: &AppHandle,
+    session_id: &str,
+    req: &ConnectRequest,
+    on_data: &Channel<InvokeResponseBody>,
+) {
+    if req.save_password == Some(true) {
+        if let Some(password) = &req.password {
+            let id = password_id(&req.host, req.port, &req.username);
+            if let Err(e) = app.state::<AppState>().secrets.set(&id, password) {
+                log::warn!("failed to save password for {id}: {e}");
+                // Not worth ending a working session over, but the user asked
+                // for it to be saved, so say it wasn't — in the terminal itself.
+                let _ = on_data.send(InvokeResponseBody::Raw(SAVE_PASSWORD_FAILED.to_vec()));
+            }
+        }
     }
     emit_status(app, session_id, SessionStatus::Ready);
 }
+
+const SAVE_PASSWORD_FAILED: &[u8] =
+    b"\x1b[33m[simplessh] The password could not be saved to Windows Credential Manager.\x1b[0m\r\n";
 
 /// The per-session task: connect, authenticate, open a PTY shell, then pump
 /// bytes both ways until the channel closes or a disconnect is requested.
@@ -324,7 +336,7 @@ async fn run_session(
         }
     };
 
-    on_ready(&app, &session_id);
+    on_ready(&app, &session_id, &req, &on_data);
     if let Some((cols, rows)) = queued_resize {
         let _ = channel.window_change(cols, rows, 0, 0).await;
     }

@@ -21,9 +21,9 @@ impl SecretStore {
         entry(id).and_then(|e| e.get_password()).is_ok()
     }
 
-    /// Persist a secret. Returns false if the OS keystore rejected it.
-    pub fn set(&self, id: &str, plaintext: &str) -> bool {
-        entry(id).and_then(|e| e.set_password(plaintext)).is_ok()
+    /// Persist a secret; fails if the OS keystore rejected it.
+    pub fn set(&self, id: &str, plaintext: &str) -> Result<(), keyring::Error> {
+        entry(id).and_then(|e| e.set_password(plaintext))
     }
 
     /// Fetch a stored secret, or None if absent/unavailable.
@@ -42,6 +42,9 @@ mod tests {
 
     #[test]
     fn password_id_scheme() {
-        assert_eq!(password_id("example.com", 22, "alice"), "pw:alice@example.com:22");
+        assert_eq!(
+            password_id("example.com", 22, "alice"),
+            "pw:alice@example.com:22"
+        );
     }
 }

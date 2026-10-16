@@ -260,6 +260,17 @@ body {
   color: var(--muted);
 }
 
+/* Inline text-style button inside a hint (e.g. "Forget it"). */
+.card button.link-btn {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: normal;
+  color: var(--focus-ring);
+  background: none;
+  text-decoration: underline;
+}
+
 /* Checkbox rows override the default stacked label layout. */
 .card label.checkbox {
   flex-direction: row;

@@ -17,16 +17,18 @@ function bootstrap(): void {
   window.addEventListener('contextmenu', (e) => e.preventDefault())
 
   // App-level shortcuts shared by the window listener and each terminal so they
-  // work whether the focus is on the terminal or the connect form.
+  // work whether the focus is on the terminal or the connect form. Tab
+  // open/close need Shift: plain Ctrl+T / Ctrl+W belong to the shell
+  // (readline's transpose-chars / delete-word).
   function appShortcut(e: KeyboardEvent): boolean {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false
     switch (e.code) {
       case 'KeyT':
-        if (e.shiftKey) return false
+        if (!e.shiftKey) return false
         tabs.newTab()
         return true
       case 'KeyW':
-        if (e.shiftKey) return false
+        if (!e.shiftKey) return false
         tabs.closeActive()
         return true
       case 'Tab':
