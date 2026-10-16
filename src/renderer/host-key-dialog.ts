@@ -19,7 +19,8 @@ function el<T extends HTMLElement>(id: string): T {
   return node as T
 }
 
-const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'
+const FOCUSABLE =
+  'a[href], button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
 /** Trap Tab/Shift+Tab inside `container` until the returned dispose() is called. */
 function trapFocus(container: HTMLElement): () => void {
@@ -55,6 +56,7 @@ export function setupHostKeyDialog(): HostKeyDialog {
   const knownLine = el<HTMLElement>('hostkey-known-line')
   const knownEl = el<HTMLElement>('hostkey-known')
   const warning = el<HTMLElement>('hostkey-warning')
+  const storeWarning = el<HTMLElement>('hostkey-store-warning')
   const card = view.querySelector<HTMLElement>('.card')!
   const acceptBtn = el<HTMLButtonElement>('hostkey-accept')
   const cancelBtn = el<HTMLButtonElement>('hostkey-cancel')
@@ -93,6 +95,12 @@ export function setupHostKeyDialog(): HostKeyDialog {
         hostEl.textContent = `${info.host}:${info.port}`
         fpEl.textContent = `SHA256:${info.fingerprint}`
         warning.textContent = changed ? CHANGED_MSG : UNKNOWN_MSG
+        // A store that failed to load makes every host look unknown, which
+        // would hide a changed key — say so rather than prompt as usual.
+        storeWarning.textContent = info.storeWarning
+          ? `Your saved known-hosts file could not be loaded, so keys you trusted before cannot be checked and a changed key would look like this. (${info.storeWarning})`
+          : ''
+        storeWarning.classList.toggle('hidden', !info.storeWarning)
 
         if (changed && info.knownFingerprint) {
           knownEl.textContent = `SHA256:${info.knownFingerprint}`

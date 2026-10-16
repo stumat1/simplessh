@@ -7,16 +7,17 @@
 use std::sync::Arc;
 
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
-use tauri::{AppHandle, Manager};
+use russh::MethodKind;
+use tauri::AppHandle;
+use tokio::time::Instant;
 
 use super::handler::ClientHandler;
 use crate::error::{Error, Result};
-use crate::state::AppState;
 use crate::types::ConnectRequest;
 
 /// How long the banner/kex phase may make no progress before we give up on a
-/// server that accepted TCP but stalled. The host-key prompt (which pauses
-/// the handshake on the user) extends the deadline — see connect_and_auth.
+/// server that accepted TCP but stalled. The clock is paused while the
+/// host-key prompt waits on the user — see connect_and_auth.
 const HANDSHAKE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// Bound password and keyboard-interactive exchanges after host-key approval.
 const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
@@ -27,11 +28,13 @@ pub async fn connect_and_auth(
     req: &ConnectRequest,
     config: Arc<russh::client::Config>,
 ) -> Result<Handle<ClientHandler>> {
+    let (prompt_tx, mut prompt_rx) = tokio::sync::watch::channel(false);
     let handler = ClientHandler {
         app: app.clone(),
         session_id: session_id.to_string(),
         host: req.host.clone(),
         port: req.port,
+        prompt_open: prompt_tx,
     };
 
     // Bound the TCP connect. The handshake and auth phases below carry their
@@ -46,35 +49,52 @@ pub async fn connect_and_auth(
 
     // Bound the handshake (banner + kex): a server that goes silent here must
     // not pin the tab on "Connecting…" forever. The host-key trust prompt runs
-    // *inside* this future and may legitimately sit on the user for minutes,
-    // so when the deadline fires while a prompt is pending we extend it past
-    // the prompt's own timeout instead of aborting.
+    // *inside* this future and may legitimately sit on the user for minutes
+    // (it has its own timeout), so the stall clock stops while the prompt is
+    // open and restarts from zero once it is answered.
     let handshake = russh::client::connect_stream(config, stream, handler);
     tokio::pin!(handshake);
-    let mut deadline = tokio::time::Instant::now() + HANDSHAKE_STALL_TIMEOUT;
+    let mut deadline = Instant::now() + HANDSHAKE_STALL_TIMEOUT;
+    let mut prompt_open = false;
+    let mut watch_prompt = true;
     let mut handle = loop {
         tokio::select! {
             result = &mut handshake => {
                 break result.map_err(|e| Error::msg(e.to_string()))?;
             }
-            _ = tokio::time::sleep_until(deadline) => {
-                let prompt_pending = {
-                    let state = app.state::<AppState>();
-                    let pending = state.pending.host_key.lock().unwrap();
-                    pending.contains_key(session_id)
-                };
-                if !prompt_pending {
-                    return Err(Error::msg("The server did not complete the SSH handshake in time"));
+            changed = prompt_rx.changed(), if watch_prompt => {
+                if changed.is_err() {
+                    // Handler dropped: the handshake is finishing anyway.
+                    watch_prompt = false;
+                } else {
+                    prompt_open = *prompt_rx.borrow_and_update();
+                    if !prompt_open {
+                        deadline = Instant::now() + HANDSHAKE_STALL_TIMEOUT;
+                    }
                 }
-                deadline += super::handler::PROMPT_TIMEOUT;
+            }
+            _ = tokio::time::sleep_until(deadline), if !prompt_open => {
+                return Err(Error::msg("The server did not complete the SSH handshake in time"));
             }
         }
     };
 
     let auth = async {
         let password = req.password.as_deref().unwrap_or("");
-        if auth_password(&mut handle, &req.username, password).await? {
-            return Ok::<bool, Error>(true);
+        match auth_password(&mut handle, &req.username, password).await? {
+            AuthResult::Success => return Ok::<bool, Error>(true),
+            // Password accepted but the server wants a second factor.
+            AuthResult::Failure {
+                partial_success: true,
+                ..
+            } => return Ok(false),
+            // Only retry via keyboard-interactive when the server offers it,
+            // so a wrong password costs one failed attempt (fail2ban,
+            // lockout policies), not two.
+            AuthResult::Failure {
+                remaining_methods, ..
+            } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {}
+            AuthResult::Failure { .. } => return Ok(false),
         }
         keyboard_interactive_password(&mut handle, &req.username, password).await
     };
@@ -94,12 +114,11 @@ async fn auth_password(
     handle: &mut Handle<ClientHandler>,
     username: &str,
     password: &str,
-) -> Result<bool> {
-    let result = handle
+) -> Result<AuthResult> {
+    handle
         .authenticate_password(username, password)
         .await
-        .map_err(|e| Error::msg(e.to_string()))?;
-    Ok(matches!(result, AuthResult::Success))
+        .map_err(|e| Error::msg(e.to_string()))
 }
 
 /// Many OpenSSH servers implement password auth *via* keyboard-interactive

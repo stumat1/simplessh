@@ -10,8 +10,20 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 import { listen } from '@tauri-apps/api/event'
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager'
-import type { DataListener, ErrorListener, HostKeyListener, SshApi, StatusListener } from '@shared/api'
-import type { ConnectRequest, HostEntry, HostKeyPrompt, SessionStatus, TerminalSize } from '@shared/types'
+import type {
+  DataListener,
+  ErrorListener,
+  HostKeyListener,
+  SshApi,
+  StatusListener
+} from '@shared/api'
+import type {
+  ConnectRequest,
+  HostEntry,
+  HostKeyPrompt,
+  SessionStatus,
+  TerminalSize
+} from '@shared/types'
 
 const dataListeners = new Set<DataListener>()
 const statusListeners = new Set<StatusListener>()
@@ -51,18 +63,13 @@ void listen<HostKeyPrompt>('ssh:hostkey-prompt', (e) => {
 export const tauriSshApi: SshApi = {
   getVersion: () => getVersion(),
 
-  connect: async (req: ConnectRequest, size?: TerminalSize): Promise<string> => {
+  connect: async (sessionId: string, req: ConnectRequest, size?: TerminalSize): Promise<void> => {
     const onData = new Channel<ArrayBuffer>()
-    // The channel needs the sessionId, which only exists once connect returns;
-    // buffer is unnecessary because the backend emits no data before the shell
-    // opens, which is well after this resolves.
-    let sessionId = ''
     onData.onmessage = (buf) => {
       const bytes = new Uint8Array(buf)
       for (const cb of dataListeners) cb(sessionId, bytes)
     }
-    sessionId = await invoke<string>('ssh_connect', { req, size, onData })
-    return sessionId
+    await invoke('ssh_connect', { sessionId, req, size, onData })
   },
 
   disconnect: (sessionId) => invoke('ssh_disconnect', { sessionId }),

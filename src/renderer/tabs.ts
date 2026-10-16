@@ -23,9 +23,10 @@ class Tab {
   private lastReq: ConnectRequest | null = null
   private wasConnected = false
   private tooltip = ''
-  // Cancel pressed before ssh.connect() resolved the sessionId — disconnect
-  // as soon as it does.
+  // Cancel pressed (or the tab closed) before ssh.connect() resolved — the
+  // backend may not have known the session yet, so disconnect again once it does.
   private cancelRequested = false
+  private disposed = false
 
   readonly pane: HTMLElement
   readonly button: HTMLElement
@@ -129,7 +130,7 @@ class Tab {
     closeBtn.title = 'Close tab'
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation()
-      this.mgr.closeTab(this)
+      void this.mgr.closeTab(this)
     })
     this.button.append(this.dot, this.titleEl, closeBtn)
     this.button.addEventListener('click', () => this.mgr.activate(this))
@@ -170,18 +171,22 @@ class Tab {
     const handle = this.ensureTerminal()
     handle.term.clear()
     this.applyState('connecting')
-    // Reflect connecting state on the tab dot locally — the backend
-    // 'connecting' status event fires before this tab is registered by sessionId.
     this.dot.dataset.status = 'connecting'
+    // Register under our own sessionId before connecting, so status/error
+    // events that beat the invoke response (a fast failure) still find us.
+    const sessionId = crypto.randomUUID()
+    this.sessionId = sessionId
+    this.mgr.registerSession(sessionId, this)
     try {
-      const sessionId = await window.ssh.connect(req, {
+      await window.ssh.connect(sessionId, req, {
         cols: handle.term.cols,
         rows: handle.term.rows
       })
-      this.sessionId = sessionId
-      this.mgr.registerSession(sessionId, this)
-      if (this.cancelRequested) void window.ssh.disconnect(sessionId)
+      if (this.cancelRequested || this.disposed) void window.ssh.disconnect(sessionId)
     } catch (err) {
+      this.mgr.unregisterSession(sessionId)
+      if (this.sessionId === sessionId) this.sessionId = null
+      if (this.disposed) return
       this.form.setBusy(false)
       this.wasConnected = false
       this.form.prefill(req)
@@ -288,8 +293,13 @@ class Tab {
     }
   }
 
+  isConnected(): boolean {
+    return this.state === 'connected'
+  }
+
   /** Disconnect (if live) and tear down all DOM/resources. */
   dispose(): void {
+    this.disposed = true
     if (this.sessionId) {
       void window.ssh.disconnect(this.sessionId)
       this.mgr.unregisterSession(this.sessionId)
@@ -316,6 +326,8 @@ export class TabManager {
   private readonly tabs: Tab[] = []
   private active: Tab | null = null
   private readonly bySessionId = new Map<string, Tab>()
+  /** Tabs whose close-confirmation dialog is open (repeat Ctrl+Shift+W is ignored). */
+  private readonly confirmingClose = new Set<Tab>()
 
   constructor(
     private readonly tabBar: HTMLElement,
@@ -375,7 +387,21 @@ export class TabManager {
     return false
   }
 
-  closeTab(tab: Tab): void {
+  /** Close a tab, confirming first if it has a live connection. */
+  async closeTab(tab: Tab): Promise<void> {
+    if (this.confirmingClose.has(tab)) return
+    if (tab.isConnected()) {
+      this.confirmingClose.add(tab)
+      try {
+        const ok = await ask(`Disconnect from ${tab.button.title} and close this tab?`, {
+          title: 'simplessh',
+          kind: 'warning'
+        })
+        if (!ok) return
+      } finally {
+        this.confirmingClose.delete(tab)
+      }
+    }
     const index = this.tabs.indexOf(tab)
     if (index < 0) return
     tab.dispose()
@@ -390,9 +416,9 @@ export class TabManager {
     this.refreshStatusBar()
   }
 
-  /** Close the active tab (Ctrl+W). */
+  /** Close the active tab (Ctrl+Shift+W). */
   closeActive(): void {
-    if (this.active) this.closeTab(this.active)
+    if (this.active) void this.closeTab(this.active)
   }
 
   registerSession(sessionId: string, tab: Tab): void {

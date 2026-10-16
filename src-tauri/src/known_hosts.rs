@@ -38,16 +38,23 @@ struct StoredEntry {
 pub struct KnownHostsStore {
     file_path: PathBuf,
     entries: HashMap<String, StoredEntry>,
+    /// Set when the file existed but couldn't be loaded: every host then
+    /// looks unknown, and the trust prompt must say why.
+    load_warning: Option<String>,
 }
 
 impl KnownHostsStore {
     pub fn new(file_path: PathBuf) -> Self {
-        // Corrupt/unreadable store — start empty rather than crash.
-        let entries = std::fs::read_to_string(&file_path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
-        Self { file_path, entries }
+        let (entries, load_warning) = crate::store::load(&file_path);
+        Self {
+            file_path,
+            entries,
+            load_warning,
+        }
+    }
+
+    pub fn load_warning(&self) -> Option<&str> {
+        self.load_warning.as_deref()
     }
 
     fn id(host: &str, port: u16) -> String {
@@ -55,11 +62,7 @@ impl KnownHostsStore {
     }
 
     fn save(&self) -> Result<(), String> {
-        if let Some(dir) = self.file_path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        let json = serde_json::to_string_pretty(&self.entries).map_err(|e| e.to_string())?;
-        std::fs::write(&self.file_path, json).map_err(|e| e.to_string())
+        crate::store::save(&self.file_path, &self.entries)
     }
 
     /// Classify a presented host key against what we have stored.
@@ -133,5 +136,15 @@ mod tests {
         // Reload from disk — trust persists.
         let reloaded = KnownHostsStore::new(path);
         assert_eq!(reloaded.check("example.com", 22, key), HostKeyCheck::Match);
+        assert!(reloaded.load_warning().is_none());
+    }
+
+    #[test]
+    fn corrupt_file_reports_load_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts.json");
+        std::fs::write(&path, "garbage").unwrap();
+        let store = KnownHostsStore::new(path);
+        assert!(store.load_warning().is_some());
     }
 }

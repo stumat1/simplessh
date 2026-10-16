@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
-// Vite config for the Tauri build of the renderer. The Electron build keeps
-// using electron.vite.config.ts until the port is complete.
+// Vite config for the renderer; Tauri runs it via beforeDevCommand /
+// beforeBuildCommand (see src-tauri/tauri.conf.json).
 export default defineConfig({
   root: 'src/renderer',
   resolve: {

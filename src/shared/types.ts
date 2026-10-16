@@ -31,6 +31,8 @@ export interface HostKeyPrompt {
   status: 'unknown' | 'changed'
   /** For 'changed': the fingerprint we had on file. */
   knownFingerprint?: string
+  /** Set when the known-hosts file couldn't be loaded, so earlier trust can't be checked. */
+  storeWarning?: string
 }
 
 /** Initial PTY dimensions sent with a connect request. */
